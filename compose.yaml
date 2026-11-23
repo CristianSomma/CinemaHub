@@ -1,0 +1,91 @@
+# Ambiente di sviluppo CinemaHub: Apache, PHP-FPM e MariaDB.
+# Le impostazioni personalizzabili sono lette dal file .env.
+name: "${COMPOSE_PROJECT_NAME:-php-dev}"
+
+services:
+  # Server HTTP: serve le pagine pubbliche e inoltra gli script PHP a PHP-FPM.
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+      args:
+        APACHE_VERSION: "${APACHE_VERSION:-2.4}"
+    ports:
+      # Il sito è raggiungibile solo dal computer locale.
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
+    volumes:
+      # Apache deve poter leggere i file, ma non modificarli.
+      - "${APP_PATH:-./src}:/var/www/html:ro"
+    depends_on:
+      php:
+        condition: service_started
+    restart: unless-stopped
+
+  # Motore PHP: esegue il codice e accede a MariaDB.
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: php
+      args:
+        PHP_VERSION: "${PHP_VERSION:-8.5}"
+    volumes:
+      # Stessa cartella condivisa con Apache: ogni modifica locale è immediata.
+      - "${APP_PATH:-./src}:/var/www/html"
+    environment:
+      DB_HOST: "${DB_HOST:-database}"
+      DB_PORT: "${DB_PORT:-3306}"
+      DB_NAME: "${DB_NAME:-app_database}"
+      DB_USER: "${DB_USER:-app_user}"
+      DB_PASSWORD: "${DB_PASSWORD:?Imposta DB_PASSWORD nel file .env}"
+    depends_on:
+      database:
+        condition: service_healthy
+    expose:
+      - "9000"
+    restart: unless-stopped
+
+  # Database relazionale persistente.
+  database:
+    image: "mariadb:${MARIADB_VERSION:-11.8}"
+    environment:
+      MARIADB_DATABASE: "${DB_NAME:-app_database}"
+      MARIADB_USER: "${DB_USER:-app_user}"
+      MARIADB_PASSWORD: "${DB_PASSWORD:?Imposta DB_PASSWORD nel file .env}"
+      MARIADB_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:?Imposta DB_ROOT_PASSWORD nel file .env}"
+    ports:
+      # Porta opzionale per collegarsi da un client SQL installato sul computer.
+      - "127.0.0.1:${DB_HOST_PORT:-3307}:3306"
+    volumes:
+      # Volume nominato: i dati sopravvivono a down, rebuild e ricreazione container.
+      - db_data:/var/lib/mysql
+      # Eseguito automaticamente solo quando il volume viene inizializzato la prima volta.
+      - ./src/database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  # Interfaccia grafica facoltativa per amministrare MariaDB.
+  phpmyadmin:
+    image: "phpmyadmin:${PHPMYADMIN_VERSION:-5.2-apache}"
+    profiles: ["tools"]
+    ports:
+      - "127.0.0.1:${PMA_PORT:-8081}:80"
+    environment:
+      PMA_HOST: "database"
+      PMA_PORT: "3306"
+      UPLOAD_LIMIT: "32M"
+    depends_on:
+      database:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  # Con COMPOSE_PROJECT_NAME=php-dev, il nome resta php-dev_db_data,
+  # come nella configurazione precedente: Docker può riutilizzare i dati esistenti.
+  db_data:

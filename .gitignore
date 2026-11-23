@@ -1,0 +1,11 @@
+# Segreti e configurazione locale: condividi .env.example, non .env.
+.env
+
+# File generati da strumenti di sviluppo.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+node_modules/
+vendor/
+*.log
